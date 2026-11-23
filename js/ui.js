@@ -34,7 +34,8 @@ const ERRORS = [
   [/password should be at least/i, 'Das Passwort ist zu kurz (mindestens 8 Zeichen).'],
   [/rate limit|too many requests|security purposes/i, 'Zu viele Versuche. Bitte warte kurz und versuch es erneut.'],
   [/same.*password|different from the old/i, 'Das neue Passwort muss sich vom alten unterscheiden.'],
-  [/row-level security|permission denied/i, 'Dafür fehlt dir die Berechtigung.'],
+  [/bring_claims_fixed_unique|duplicate key/i, 'Das hat schon jemand anderes übernommen.'],
+  [/row-level security|permission denied/i, 'Nicht möglich: Die Abstimmung ist geschlossen oder dir fehlt die Berechtigung.'],
   [/failed to fetch|networkerror/i, 'Keine Verbindung zum Server.'],
   [/display_name_check/i, 'Der Name muss 2 bis 30 Zeichen lang sein.'],
 ];
@@ -67,6 +68,8 @@ const dtf = new Intl.DateTimeFormat('de-DE', {
 const df = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 export const fmtDateTime = (iso) => dtf.format(new Date(iso)) + ' Uhr';
 export const fmtDate = (iso) => df.format(new Date(iso));
+const tf = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
+export const fmtTime = (iso) => tf.format(new Date(iso)) + ' Uhr';
 
 // ISO -> Wert für <input type="datetime-local"> in lokaler Zeit
 export function toLocalInput(iso) {

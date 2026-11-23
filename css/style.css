@@ -270,11 +270,69 @@ table.stats tr.me td { background: rgba(201, 162, 74, .08); }
   h1 { font-size: 1.3rem; }
   .topbar { padding-left: .7rem; padding-right: .7rem; }
   .topbar nav a { padding: .3rem .55rem; font-size: .85rem; }
-  .bring-row { grid-template-columns: 1fr auto; }
-  .bring-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .bring-row { gap: .4rem; padding: .5rem .6rem; }
+  .bring-row .btn.small { padding: .3rem .5rem; font-size: .8rem; }
   .records li { grid-template-columns: 1fr auto; }
   table.stats { font-size: .85rem; }
   table.stats th, table.stats td { padding: .45rem .35rem; }
   table.stats .opt { display: none; }
   .rec-label { grid-column: 1 / -1; }
 }
+
+/* ---- Version 2 ---- */
+.evening-item.big { padding: 1rem; border-color: var(--line); }
+.evening-item.big .evening-date { font-family: var(--serif); font-size: 1.25rem; color: var(--gold-2); }
+.deadline { color: #6fd3a3; font-size: .85rem; margin: .2rem 0 0; }
+.deadline.closed { color: var(--muted); }
+details.more { margin-top: .7rem; }
+details.more summary { cursor: pointer; color: var(--gold-2); padding: .4rem 0; }
+details.more .list { margin-top: .5rem; }
+h3.sub { margin-top: 1rem; font-family: var(--sans); font-size: .85rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+
+.food-pick { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; margin-bottom: 1rem; }
+.picker-label { display: block; font-weight: 600; margin-bottom: .35rem; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: .2rem; gap: .2rem; }
+.seg-btn { font: inherit; font-weight: 700; cursor: pointer; padding: .55rem 0; border: none; border-radius: 8px; background: none; color: var(--text); }
+.seg-btn:hover:not(:disabled) { background: rgba(201, 162, 74, .15); }
+.seg-btn.selected { background: var(--gold); color: #1b1406; }
+.seg-btn:disabled { opacity: .5; cursor: default; }
+.shopping { background: rgba(192, 57, 43, .1); border: 1px solid rgba(192, 57, 43, .4); border-radius: 12px; padding: .8rem .9rem; }
+.shopping h3 { color: var(--gold-2); margin-bottom: .3rem; }
+.shopping-total { font-size: 1.25rem; margin-bottom: .4rem; }
+.order-list { list-style: none; margin: .5rem 0 0; padding: .5rem 0 0; border-top: 1px solid rgba(201, 162, 74, .15); }
+.order-list li { display: flex; justify-content: space-between; gap: 1rem; padding: .15rem 0; }
+
+.legacy p { margin-bottom: .5rem; }
+.legacy .badge { margin-left: 0; margin-right: .4rem; }
+.editor-list li.buyer { background: rgba(192, 57, 43, .12); }
+table.fix { width: 100%; border-collapse: collapse; }
+table.fix th, table.fix td { padding: .35rem .3rem; text-align: center; border-bottom: 1px solid rgba(201, 162, 74, .12); }
+table.fix .l { text-align: left; }
+table.fix th { color: var(--muted); font-size: .8rem; font-weight: 600; }
+table.fix select { min-width: 0; padding: .35rem .4rem; }
+select.assign { min-width: 0; max-width: 14rem; padding: .35rem .5rem; font-size: .9rem; }
+
+.evening-item .deadline { grid-column: 1; }
+.evening-meta .deadline { margin: 0; }
+.bring-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 7rem; }
+.evening-item { grid-template-columns: 1fr; }
+.evening-item .badge { grid-column: 1; grid-row: auto; justify-self: start; margin-top: .35rem; }
+
+/* ---- Profilbilder ---- */
+.avatar { display: inline-grid; place-items: center; flex: none; border-radius: 50%; object-fit: cover; background: #1d3a2e; border: 1px solid var(--line); }
+.avatar.initial { color: var(--gold-2); font-family: var(--serif); font-weight: 700; }
+.avatar.xs { width: 1.4rem; height: 1.4rem; font-size: .7rem; }
+.avatar.sm { width: 1.75rem; height: 1.75rem; font-size: .85rem; }
+.avatar.md { width: 2.4rem; height: 2.4rem; font-size: 1.05rem; }
+.avatar.xl { width: 7rem; height: 7rem; font-size: 2.8rem; border: 2px solid var(--gold); }
+.who { display: inline-flex; align-items: center; gap: .5rem; min-width: 0; }
+.who > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.att-col li { padding: .2rem 0; }
+.topbar nav a .avatar { vertical-align: middle; margin-right: .35rem; width: 1.3rem; height: 1.3rem; }
+.topbar nav a.active .avatar { border-color: #1b1406; }
+.profile-pic { display: flex; flex-direction: column; align-items: center; gap: .8rem; text-align: center; }
+.profile-pic .hint { margin: 0; }
+.legacy-row { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .6rem; }
+.chips { display: flex; gap: .4rem .9rem; flex-wrap: wrap; }
+.hidden-file { position: fixed; left: -9999px; }
+.order-list li .who { font-size: .95rem; }

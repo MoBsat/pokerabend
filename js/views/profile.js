@@ -1,24 +1,32 @@
-import { sb, q } from '../supabase.js';
+import { sb } from '../supabase.js';
 import { h, run, card, toast, formData } from '../ui.js';
 import { state, render, loadProfile } from '../app.js';
+import { avatar, uploadAvatar, removeAvatar, pickImage } from '../avatar.js';
 
 export function profileView() {
-  const p = state.profile;
   return h('div', {},
+    state.player ? card(
+      h('div', { class: 'profile-pic' },
+        avatar(state.player, 'xl'),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn primary', onclick: (e) => {
+            const btn = e.currentTarget;
+            pickImage(async (file) => {
+              if (await run(async () => { await uploadAvatar(state.player, file); await loadProfile(); },
+                { btn, ok: 'Profilbild gespeichert.' })) render();
+            });
+          } }, state.player.avatar_path ? 'Bild ändern' : 'Profilbild hochladen'),
+          state.player.avatar_path ? h('button', { class: 'btn', onclick: async (e) => {
+            if (!confirm('Profilbild entfernen?')) return;
+            if (await run(async () => { await removeAvatar(state.player); await loadProfile(); },
+              { btn: e.currentTarget, ok: 'Profilbild entfernt.' })) render();
+          } }, 'Entfernen') : null),
+        h('p', { class: 'hint' }, 'Das Bild wird quadratisch zugeschnitten und verkleinert. Standortdaten aus Handyfotos werden dabei entfernt.'))) : null,
     card(
       h('h1', {}, 'Profil'),
-      h('p', { class: 'muted' }, state.session.user.email),
-      h('form', { onsubmit: async (e) => {
-        e.preventDefault();
-        const name = formData(e.target).name.trim();
-        if (await run(async () => {
-          await q(sb.from('profiles').update({ display_name: name }).eq('id', p.id));
-          await loadProfile();
-        }, { btn: e.submitter, ok: 'Name gespeichert.' })) render();
-      } },
-        h('label', { class: 'field' }, h('span', {}, 'Anzeigename'),
-          h('input', { name: 'name', value: p.display_name, minlength: 2, maxlength: 30, required: true })),
-        h('button', { class: 'btn primary', type: 'submit' }, 'Speichern'))),
+      h('p', {}, h('span', { class: 'muted' }, 'Spieler: '), h('strong', {}, state.player?.name ?? 'noch nicht zugeordnet')),
+      h('p', {}, h('span', { class: 'muted' }, 'E-Mail: '), state.session.user.email),
+      h('p', { class: 'hint' }, 'Den Spielernamen ändert der Admin.')),
     card(
       h('h2', {}, 'Passwort ändern'),
       h('form', { onsubmit: async (e) => {

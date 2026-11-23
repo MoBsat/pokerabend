@@ -1,11 +1,7 @@
 -- =====================================================================
--- Pokerabend – Datenbankschema für Supabase
+-- Pokerabend – komplettes Datenbankschema (Neuinstallation)
 -- Einmal komplett im Supabase SQL-Editor ausführen.
 -- =====================================================================
-
--- ---------------------------------------------------------------------
--- Tabellen
--- ---------------------------------------------------------------------
 
 create table public.profiles (
   id           uuid primary key references auth.users(id) on delete cascade,
@@ -14,67 +10,6 @@ create table public.profiles (
   approved     boolean not null default false,   -- neue Accounts müssen vom Admin freigeschaltet werden
   created_at   timestamptz not null default now()
 );
-
-create table public.evenings (
-  id         bigint generated always as identity primary key,
-  starts_at  timestamptz not null,
-  location   text check (char_length(location) <= 100),
-  notes      text check (char_length(notes) <= 1000),
-  closed     boolean not null default false,      -- abgeschlossen = keine Abstimmungen mehr
-  created_at timestamptz not null default now()
-);
-
-create table public.attendance (
-  evening_id bigint not null references public.evenings(id) on delete cascade,
-  user_id    uuid   not null references public.profiles(id) on delete cascade,
-  status     text   not null check (status in ('ja', 'vielleicht', 'nein')),
-  updated_at timestamptz not null default now(),
-  primary key (evening_id, user_id)
-);
-
-create table public.food_options (
-  id         bigint generated always as identity primary key,
-  evening_id bigint not null references public.evenings(id) on delete cascade,
-  label      text   not null check (char_length(label) between 1 and 60),
-  unique (id, evening_id)
-);
-
--- Eine Stimme pro Person und Abend (änderbar)
-create table public.food_votes (
-  evening_id bigint not null,
-  user_id    uuid   not null references public.profiles(id) on delete cascade,
-  option_id  bigint not null,
-  primary key (evening_id, user_id),
-  foreign key (option_id, evening_id)
-    references public.food_options(id, evening_id) on delete cascade
-);
-
--- Admin gibt Positionen vor, wer zuerst zugreift, blockiert sie
-create table public.bring_items (
-  id         bigint generated always as identity primary key,
-  evening_id bigint not null references public.evenings(id) on delete cascade,
-  label      text   not null check (char_length(label) between 1 and 60),
-  claimed_by uuid references public.profiles(id) on delete set null,
-  claimed_at timestamptz
-);
-
--- Vollständige Endplatzierung eines Abends
-create table public.results (
-  evening_id bigint not null references public.evenings(id) on delete cascade,
-  user_id    uuid   not null references public.profiles(id) on delete cascade,
-  place      int    not null check (place >= 1),
-  primary key (evening_id, user_id),
-  unique (evening_id, place)
-);
-
-create index on public.attendance (user_id);
-create index on public.food_options (evening_id);
-create index on public.bring_items (evening_id);
-create index on public.results (user_id);
-
--- ---------------------------------------------------------------------
--- Hilfsfunktionen (security definer, damit RLS nicht rekursiv wird)
--- ---------------------------------------------------------------------
 
 create function public.is_admin() returns boolean
 language sql stable security definer set search_path = '' as $$
@@ -89,17 +24,6 @@ language sql stable security definer set search_path = '' as $$
     (select p.approved from public.profiles p where p.id = auth.uid()),
     false);
 $$;
-
-create function public.evening_open(p_evening bigint) returns boolean
-language sql stable security definer set search_path = '' as $$
-  select coalesce(
-    (select not e.closed from public.evenings e where e.id = p_evening),
-    false);
-$$;
-
--- ---------------------------------------------------------------------
--- Profil bei Registrierung automatisch anlegen
--- ---------------------------------------------------------------------
 
 create function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = '' as $$
@@ -139,128 +63,362 @@ create trigger protect_profile_fields
   before update on public.profiles
   for each row execute function public.protect_profile_fields();
 
--- ---------------------------------------------------------------------
--- RPCs
--- ---------------------------------------------------------------------
+alter table public.profiles enable row level security;
+revoke all on public.profiles from anon;
+grant select, update on public.profiles to authenticated;
 
--- Position übernehmen (atomar: nur wenn noch frei)
-create function public.claim_item(p_item bigint) returns void
-language plpgsql security definer set search_path = '' as $$
-begin
-  if not public.is_approved() then
-    raise exception 'Account nicht freigeschaltet';
-  end if;
-  update public.bring_items b
-     set claimed_by = auth.uid(), claimed_at = now()
-   where b.id = p_item
-     and b.claimed_by is null
-     and public.evening_open(b.evening_id);
-  if not found then
-    raise exception 'Schon vergeben oder Abend abgeschlossen';
-  end if;
-end;
-$$;
-
--- Position wieder freigeben (eigene, oder als Admin jede)
-create function public.release_item(p_item bigint) returns void
-language plpgsql security definer set search_path = '' as $$
-begin
-  update public.bring_items b
-     set claimed_by = null, claimed_at = null
-   where b.id = p_item
-     and (public.is_admin()
-          or (b.claimed_by = auth.uid()
-              and public.is_approved()
-              and public.evening_open(b.evening_id)));
-  if not found then
-    raise exception 'Keine Berechtigung oder Abend abgeschlossen';
-  end if;
-end;
-$$;
-
--- Ergebnis speichern: p_players in Reihenfolge Platz 1 .. n
-create function public.set_results(p_evening bigint, p_players uuid[]) returns void
-language plpgsql security definer set search_path = '' as $$
-begin
-  if not public.is_admin() then
-    raise exception 'Nur der Admin darf Ergebnisse eintragen';
-  end if;
-  if (select count(distinct x) from unnest(p_players) x) <> coalesce(cardinality(p_players), 0) then
-    raise exception 'Ein Spieler ist doppelt eingetragen';
-  end if;
-  delete from public.results where evening_id = p_evening;
-  insert into public.results (evening_id, user_id, place)
-  select p_evening, t.u, t.ord::int
-    from unnest(p_players) with ordinality as t(u, ord);
-end;
-$$;
-
-revoke execute on function public.claim_item(bigint), public.release_item(bigint),
-  public.set_results(bigint, uuid[]) from public, anon;
-grant execute on function public.claim_item(bigint), public.release_item(bigint),
-  public.set_results(bigint, uuid[]) to authenticated;
-
--- ---------------------------------------------------------------------
--- Rechte + Row Level Security
--- ---------------------------------------------------------------------
-
-revoke all on all tables in schema public from anon;
-grant select, insert, update, delete on all tables in schema public to authenticated;
-grant usage, select on all sequences in schema public to authenticated;
-
-alter table public.profiles     enable row level security;
-alter table public.evenings     enable row level security;
-alter table public.attendance   enable row level security;
-alter table public.food_options enable row level security;
-alter table public.food_votes   enable row level security;
-alter table public.bring_items  enable row level security;
-alter table public.results      enable row level security;
-
--- profiles: Freigeschaltete sehen alle, Nicht-Freigeschaltete nur sich selbst
 create policy profiles_select on public.profiles for select to authenticated
   using (public.is_approved() or id = auth.uid());
 create policy profiles_update on public.profiles for update to authenticated
   using (id = auth.uid() or public.is_admin())
   with check (id = auth.uid() or public.is_admin());
 
--- evenings: lesen alle Freigeschalteten, schreiben nur Admin
+
+-- =====================================================================
+-- Spielbetrieb
+-- =====================================================================
+-- ---------------------------------------------------------------------
+-- Alte Strukturen entfernen (Accounts/Profile bleiben erhalten)
+-- ---------------------------------------------------------------------
+drop table if exists public.results, public.bring_items, public.bring_claims,
+  public.food_votes, public.food_options, public.food_orders,
+  public.attendance, public.evenings, public.players cascade;
+drop function if exists public.claim_item(bigint);
+drop function if exists public.release_item(bigint);
+drop function if exists public.set_results(bigint, uuid[]);
+drop function if exists public.set_results(bigint, bigint[]);
+drop function if exists public.evening_open(bigint);
+drop function if exists public.voting_open(bigint);
+drop function if exists public.can_vote(bigint, bigint);
+drop function if exists public.my_player_id();
+drop function if exists public.approve_user(uuid, bigint, text);
+drop function if exists public.set_vote_deadline();
+drop function if exists public.drop_food_when_not_attending();
+drop function if exists public.drop_food_when_attendance_deleted();
+
+-- ---------------------------------------------------------------------
+-- Tabellen
+-- ---------------------------------------------------------------------
+
+-- Spieler (auch ohne Account). Ein Account wird vom Admin einem Spieler zugeordnet.
+create table public.players (
+  id         bigint generated always as identity primary key,
+  name       text not null unique check (char_length(name) between 1 and 30),
+  user_id    uuid unique references public.profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create table public.evenings (
+  id            bigint generated always as identity primary key,
+  starts_at     timestamptz not null unique,
+  location      text not null default 'Bei Vito' check (char_length(location) <= 100),
+  notes         text check (char_length(notes) <= 1000),
+  vote_deadline timestamptz not null,   -- wird automatisch auf 10:00 Uhr (Berlin) am Spieltag gesetzt
+  created_at    timestamptz not null default now()
+);
+
+create table public.attendance (
+  evening_id bigint not null references public.evenings(id) on delete cascade,
+  player_id  bigint not null references public.players(id) on delete cascade,
+  status     text   not null check (status in ('ja', 'vielleicht', 'nein')),
+  updated_at timestamptz not null default now(),
+  primary key (evening_id, player_id)
+);
+
+-- Essensbestellung pro Person: je 0-2 Adana und 0-2 Wurst
+create table public.food_orders (
+  evening_id bigint   not null references public.evenings(id) on delete cascade,
+  player_id  bigint   not null references public.players(id) on delete cascade,
+  adana      smallint not null default 0 check (adana between 0 and 2),
+  wurst      smallint not null default 0 check (wurst between 0 and 2),
+  updated_at timestamptz not null default now(),
+  primary key (evening_id, player_id),
+  check (adana + wurst > 0)
+);
+
+-- Mitbringen: feste Positionen (je Abend nur einmal vergebbar) + Sonstiges mit Freitext
+create table public.bring_claims (
+  id         bigint generated always as identity primary key,
+  evening_id bigint not null references public.evenings(id) on delete cascade,
+  player_id  bigint not null references public.players(id) on delete cascade,
+  item       text   not null check (item in ('Cola', 'Wasser', 'Körner', 'Gummibärchen', 'Chips', 'Sonstiges')),
+  note       text   check (char_length(note) <= 60),
+  created_at timestamptz not null default now(),
+  check (item <> 'Sonstiges' or char_length(trim(coalesce(note, ''))) > 0)
+);
+create unique index bring_claims_fixed_unique on public.bring_claims (evening_id, item) where item <> 'Sonstiges';
+
+-- Ergebnis: volle Platzierung (place gesetzt) oder nur Sieger/Verlierer (Altdaten, place leer)
+create table public.results (
+  evening_id bigint  not null references public.evenings(id) on delete cascade,
+  player_id  bigint  not null references public.players(id) on delete cascade,
+  place      int     check (place >= 1),
+  is_winner  boolean not null default false,
+  is_buyer   boolean not null default false,   -- kauft Essen (die letzten 3)
+  primary key (evening_id, player_id),
+  unique (evening_id, place)
+);
+
+create index on public.attendance (player_id);
+create index on public.bring_claims (evening_id);
+create index on public.results (player_id);
+
+-- ---------------------------------------------------------------------
+-- Hilfsfunktionen
+-- ---------------------------------------------------------------------
+
+create function public.my_player_id() returns bigint
+language sql stable security definer set search_path = '' as $$
+  select p.id from public.players p where p.user_id = auth.uid();
+$$;
+
+create function public.voting_open(p_evening bigint) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select coalesce((select now() < e.vote_deadline from public.evenings e where e.id = p_evening), false);
+$$;
+
+-- Darf der aktuelle Nutzer für diesen Spieler an diesem Abend etwas ändern?
+-- Admin immer; sonst nur für sich selbst und nur bis zur Frist.
+create function public.can_vote(p_evening bigint, p_player bigint) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select public.is_admin()
+      or (public.is_approved()
+          and p_player = public.my_player_id()
+          and public.voting_open(p_evening));
+$$;
+
+-- Frist: Spieltag 10:00 Uhr deutscher Zeit
+create function public.set_vote_deadline() returns trigger
+language plpgsql set search_path = '' as $$
+begin
+  new.vote_deadline := (date_trunc('day', new.starts_at at time zone 'Europe/Berlin') + interval '10 hours')
+                       at time zone 'Europe/Berlin';
+  return new;
+end;
+$$;
+create trigger set_vote_deadline
+  before insert or update of starts_at on public.evenings
+  for each row execute function public.set_vote_deadline();
+
+-- Wer nicht (mehr) "dabei" ist, bekommt auch kein Essen
+create function public.drop_food_when_not_attending() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  if new.status <> 'ja' then
+    delete from public.food_orders where evening_id = new.evening_id and player_id = new.player_id;
+  end if;
+  return new;
+end;
+$$;
+create trigger drop_food_when_not_attending
+  after insert or update on public.attendance
+  for each row execute function public.drop_food_when_not_attending();
+
+create function public.drop_food_when_attendance_deleted() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  delete from public.food_orders where evening_id = old.evening_id and player_id = old.player_id;
+  return old;
+end;
+$$;
+create trigger drop_food_when_attendance_deleted
+  after delete on public.attendance
+  for each row execute function public.drop_food_when_attendance_deleted();
+
+-- ---------------------------------------------------------------------
+-- RPCs (nur Admin)
+-- ---------------------------------------------------------------------
+
+-- Platzierung speichern: p_players in Reihenfolge Platz 1 .. n; erst ab Beginn des Abends
+create function public.set_results(p_evening bigint, p_players bigint[]) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_n int := coalesce(cardinality(p_players), 0);
+begin
+  if not public.is_admin() then
+    raise exception 'Nur der Admin darf Ergebnisse eintragen';
+  end if;
+  if not exists (select 1 from public.evenings e where e.id = p_evening and now() >= e.starts_at) then
+    raise exception 'Die Platzierung kann erst nach Beginn des Abends eingetragen werden';
+  end if;
+  if v_n < 2 then
+    raise exception 'Mindestens 2 Spieler eintragen';
+  end if;
+  if (select count(distinct x) from unnest(p_players) x) <> v_n then
+    raise exception 'Ein Spieler ist doppelt eingetragen';
+  end if;
+  delete from public.results where evening_id = p_evening;
+  insert into public.results (evening_id, player_id, place, is_winner, is_buyer)
+  select p_evening, t.pid, t.ord::int, t.ord = 1, t.ord > greatest(v_n - 3, 1)
+    from unnest(p_players) with ordinality as t(pid, ord);
+end;
+$$;
+
+-- Account freischalten und einem (bestehenden oder neuen) Spieler zuordnen
+create function public.approve_user(p_user uuid, p_player bigint, p_new_name text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not public.is_admin() then
+    raise exception 'Nur der Admin darf Accounts freischalten';
+  end if;
+  update public.players set user_id = null where user_id = p_user;
+  if p_player is null then
+    if char_length(trim(coalesce(p_new_name, ''))) = 0 then
+      raise exception 'Spielername fehlt';
+    end if;
+    insert into public.players (name, user_id) values (trim(p_new_name), p_user);
+  else
+    update public.players set user_id = p_user where id = p_player and user_id is null;
+    if not found then
+      raise exception 'Dieser Spieler ist schon einem anderen Account zugeordnet';
+    end if;
+  end if;
+  update public.profiles set approved = true where id = p_user;
+end;
+$$;
+
+revoke execute on function public.set_results(bigint, bigint[]), public.approve_user(uuid, bigint, text) from public, anon;
+grant execute on function public.set_results(bigint, bigint[]), public.approve_user(uuid, bigint, text) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- Rechte + Row Level Security
+-- ---------------------------------------------------------------------
+
+revoke all on public.players, public.evenings, public.attendance, public.food_orders,
+  public.bring_claims, public.results from anon;
+grant select, insert, update, delete on public.players, public.evenings, public.attendance,
+  public.food_orders, public.bring_claims, public.results to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+
+alter table public.players      enable row level security;
+alter table public.evenings     enable row level security;
+alter table public.attendance   enable row level security;
+alter table public.food_orders  enable row level security;
+alter table public.bring_claims enable row level security;
+alter table public.results      enable row level security;
+
+create policy players_select on public.players for select to authenticated
+  using (public.is_approved() or user_id = auth.uid());
+create policy players_admin on public.players for all to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+
 create policy evenings_select on public.evenings for select to authenticated
   using (public.is_approved());
 create policy evenings_admin on public.evenings for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
 
--- attendance: eigene Zusage, solange Abend offen
 create policy attendance_select on public.attendance for select to authenticated
   using (public.is_approved());
 create policy attendance_write on public.attendance for all to authenticated
-  using (public.is_admin()
-         or (user_id = auth.uid() and public.is_approved() and public.evening_open(evening_id)))
-  with check (public.is_admin()
-         or (user_id = auth.uid() and public.is_approved() and public.evening_open(evening_id)));
+  using (public.can_vote(evening_id, player_id))
+  with check (public.can_vote(evening_id, player_id));
 
--- food_options: nur Admin pflegt die Auswahl
-create policy food_options_select on public.food_options for select to authenticated
+create policy food_select on public.food_orders for select to authenticated
   using (public.is_approved());
-create policy food_options_admin on public.food_options for all to authenticated
-  using (public.is_admin()) with check (public.is_admin());
+create policy food_write on public.food_orders for all to authenticated
+  using (public.can_vote(evening_id, player_id))
+  with check (public.can_vote(evening_id, player_id)
+              and (public.is_admin()
+                   or exists (select 1 from public.attendance a
+                               where a.evening_id = food_orders.evening_id
+                                 and a.player_id = food_orders.player_id
+                                 and a.status = 'ja')));
 
--- food_votes: eigene Stimme, solange Abend offen
-create policy food_votes_select on public.food_votes for select to authenticated
+create policy bring_select on public.bring_claims for select to authenticated
   using (public.is_approved());
-create policy food_votes_write on public.food_votes for all to authenticated
-  using (public.is_admin()
-         or (user_id = auth.uid() and public.is_approved() and public.evening_open(evening_id)))
-  with check (public.is_admin()
-         or (user_id = auth.uid() and public.is_approved() and public.evening_open(evening_id)));
+create policy bring_write on public.bring_claims for all to authenticated
+  using (public.can_vote(evening_id, player_id))
+  with check (public.can_vote(evening_id, player_id));
 
--- bring_items: Admin pflegt; Übernehmen/Abgeben nur über claim_item/release_item
-create policy bring_items_select on public.bring_items for select to authenticated
-  using (public.is_approved());
-create policy bring_items_admin on public.bring_items for all to authenticated
-  using (public.is_admin()) with check (public.is_admin());
-
--- results: lesen alle, schreiben nur Admin
+-- Ergebnisse nur lesen; geschrieben wird ausschließlich über set_results()
 create policy results_select on public.results for select to authenticated
   using (public.is_approved());
-create policy results_admin on public.results for all to authenticated
-  using (public.is_admin()) with check (public.is_admin());
+
+-- ---------------------------------------------------------------------
+-- Daten: Spieler, bisherige Abende, Termine bis Ende 2027
+-- ---------------------------------------------------------------------
+
+insert into public.players (name) values
+  ('Mo'), ('Ando'), ('Karo'), ('Fadi'), ('Hraj'), ('Vito'), ('George'), ('Awo'), ('Ahmad');
+
+-- Admin-Account mit Spieler "Mo" verknüpfen
+update public.players
+   set user_id = (select id from public.profiles where is_admin and approved order by created_at limit 1)
+ where name = 'Mo';
+
+-- Bisherige Abende + jeden Freitag 19:00 Uhr bis Ende 2027
+insert into public.evenings (starts_at)
+select (d::date + time '19:00') at time zone 'Europe/Berlin'
+  from generate_series(date '2026-10-16', date '2027-12-31', interval '7 days') d;
+
+-- Bisherige Ergebnisse (nur Sieger und Verlierer bekannt)
+insert into public.results (evening_id, player_id, is_winner, is_buyer)
+select e.id, p.id, v.winner, not v.winner
+  from (values
+    ('2026-10-16', 'Karo',   true), ('2026-10-16', 'Awo',    false), ('2026-10-16', 'Ando',  false),
+    ('2026-10-23', 'Ando',   true), ('2026-10-23', 'George', false), ('2026-10-23', 'Vito',  false),
+    ('2026-10-30', 'Fadi',   true), ('2026-10-30', 'George', false), ('2026-10-30', 'Awo',   false),
+    ('2026-11-06', 'Ando',   true), ('2026-11-06', 'George', false), ('2026-11-06', 'Awo',   false),
+    ('2026-11-13', 'Mo',     true), ('2026-11-13', 'Ahmad',  false), ('2026-11-13', 'Ando',  false),
+                                    ('2026-11-13', 'Karo',   false),
+    ('2026-11-20', 'Hraj',   true), ('2026-11-20', 'Mo',     false), ('2026-11-20', 'Vito',  false),
+                                    ('2026-11-20', 'Karo',   false)
+  ) as v(day, name, winner)
+  join public.evenings e on (e.starts_at at time zone 'Europe/Berlin')::date = v.day::date
+  join public.players p on p.name = v.name;
+
+-- ---------------------------------------------------------------------
+-- Profilbilder (Supabase Storage, öffentlicher Bucket "avatars")
+-- Dateien liegen unter avatars/player-<id>/<name>.webp
+-- ---------------------------------------------------------------------
+
+alter table public.players add column if not exists avatar_path text;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('avatars', 'avatars', true, 307200, array['image/webp', 'image/jpeg', 'image/png'])
+on conflict (id) do update
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+-- Darf der aktuelle Nutzer Bilder für diesen Ordner verwalten? (eigener Spieler oder Admin)
+create or replace function public.can_manage_avatar(p_object_name text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select public.is_admin()
+      or (public.is_approved()
+          and public.my_player_id() is not null
+          and split_part(p_object_name, '/', 1) = 'player-' || public.my_player_id()::text);
+$$;
+
+drop policy if exists avatars_insert on storage.objects;
+drop policy if exists avatars_update on storage.objects;
+drop policy if exists avatars_delete on storage.objects;
+drop policy if exists avatars_select on storage.objects;
+
+create policy avatars_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'avatars' and public.can_manage_avatar(name));
+create policy avatars_update on storage.objects for update to authenticated
+  using (bucket_id = 'avatars' and public.can_manage_avatar(name))
+  with check (bucket_id = 'avatars' and public.can_manage_avatar(name));
+create policy avatars_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'avatars' and public.can_manage_avatar(name));
+-- Lesen der eigenen Dateien (Anzeige läuft über die öffentliche URL und braucht das nicht)
+create policy avatars_select on storage.objects for select to authenticated
+  using (bucket_id = 'avatars' and public.can_manage_avatar(name));
+
+-- Bildpfad am Spieler setzen (null = Bild entfernen)
+create or replace function public.set_avatar(p_player bigint, p_path text) returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if not (public.is_admin() or (public.is_approved() and p_player = public.my_player_id())) then
+    raise exception 'Keine Berechtigung';
+  end if;
+  if p_path is not null and p_path !~ ('^player-' || p_player || '/[A-Za-z0-9._-]{1,80}$') then
+    raise exception 'Ungültiger Dateipfad';
+  end if;
+  update public.players set avatar_path = p_path where id = p_player;
+end;
+$$;
+
+revoke execute on function public.set_avatar(bigint, text) from public, anon;
+grant execute on function public.set_avatar(bigint, text) to authenticated;

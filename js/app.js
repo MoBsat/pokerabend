@@ -7,8 +7,9 @@ import { eveningView } from './views/evening.js';
 import { statsView } from './views/stats.js';
 import { adminView } from './views/admin.js';
 import { profileView } from './views/profile.js';
+import { avatar } from './avatar.js';
 
-export const state = { session: null, profile: null, recovery: false };
+export const state = { session: null, profile: null, player: null, recovery: false };
 
 const app = document.getElementById('app');
 const headerSlot = h('div');
@@ -28,6 +29,9 @@ export async function loadProfile() {
   state.profile = state.session
     ? await q(sb.from('profiles').select('*').eq('id', state.session.user.id).maybeSingle())
     : null;
+  state.player = state.profile?.approved
+    ? await q(sb.from('players').select('*').eq('user_id', state.session.user.id).maybeSingle())
+    : null;
 }
 
 export function navigate(hash) {
@@ -40,14 +44,14 @@ function header() {
     return h('header', { class: 'topbar' }, h('div', { class: 'brand' }, suit('s'), ' ', APP_NAME));
   }
   const route = location.hash.replace(/^#\/?/, '').split('/')[0];
-  const link = (r, label) => h('a', { href: `#/${r}`, class: route === r ? 'active' : null }, label);
+  const link = (r, ...label) => h('a', { href: `#/${r}`, class: route === r ? 'active' : null }, ...label);
   return h('header', { class: 'topbar' },
     h('a', { class: 'brand', href: '#/' }, suit('s'), ' ', APP_NAME),
     h('nav', {},
       link('', 'Abende'),
       link('statistik', 'Statistik'),
       state.profile.is_admin ? link('admin', 'Admin') : null,
-      link('profil', state.profile.display_name),
+      link('profil', state.player ? avatar(state.player, 'xs') : null, state.player?.name ?? state.profile.display_name),
     ));
 }
 
@@ -100,7 +104,7 @@ let initialized = false;
 sb.auth.onAuthStateChange((event, session) => {
   state.session = session;
   if (event === 'PASSWORD_RECOVERY') state.recovery = true;
-  if (event === 'SIGNED_OUT') { state.recovery = false; state.profile = null; }
+  if (event === 'SIGNED_OUT') { state.recovery = false; state.profile = null; state.player = null; }
   if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') return;
   // Supabase empfiehlt, im Callback keine weiteren Supabase-Aufrufe direkt zu awaiten
   setTimeout(async () => {
