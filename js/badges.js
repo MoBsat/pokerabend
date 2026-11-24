@@ -23,7 +23,7 @@ export async function loadMeta(force = false) {
     q(sb.from('bring_claims').select('player_id')),
     q(sb.from('posts').select('player_id')),
     q(sb.from('post_comments').select('player_id')),
-    q(sb.from('chat_messages').select('player_id')),
+    q(sb.from('chat_messages').select('id,player_id,body').order('id', { ascending: false }).limit(300)),
   ]);
   meta.data = { players, evenings, results, orders, attendance, claims, posts, comments, chats };
   compute();
@@ -154,7 +154,7 @@ function compute() {
   const bring = count(claims);
   for (const pid of leaders(bring, 3)) give(pid, 'bring', 'Mitbring-Held', `${bring.get(pid)}-mal etwas mitgebracht.`);
   const talk = count([...posts, ...comments, ...chats]);
-  for (const pid of leaders(talk, 20)) give(pid, 'talk', 'Plaudertasche', `${talk.get(pid)} Beiträge auf der Pinnwand und im Chat.`);
+  for (const pid of leaders(talk, 20)) give(pid, 'talk', 'Plaudertasche', `${talk.get(pid)} Nachrichten im Chat.`);
 
   meta.badges = badges;
 }
@@ -172,5 +172,5 @@ export const BADGE_LIST = [
   ['Wurst-Baron', 'Die meisten Würste bestellt.'],
   ['Der Eiserne', '10 Zusagen in Folge.'],
   ['Mitbring-Held', 'Am häufigsten etwas mitgebracht (mindestens 3-mal).'],
-  ['Plaudertasche', 'Die meisten Beiträge auf Pinnwand und Chat (mindestens 20).'],
+  ['Plaudertasche', 'Die meisten Chatnachrichten (mindestens 20).'],
 ];

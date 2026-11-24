@@ -2,10 +2,55 @@ import { sb, q } from '../supabase.js';
 import { SUPABASE_URL } from '../config.js';
 import { h, run, card, fmtAgo, fmtDate } from '../ui.js';
 import { state, render } from '../app.js';
-import { who, avatar, crown, resizeImage, pickImage } from '../avatar.js';
+import { avatar, crown, resizeImage, pickImage } from '../avatar.js';
 import { meta, invalidateMeta } from '../badges.js';
 
 const imageUrl = (path) => `${SUPABASE_URL}/storage/v1/object/public/board/${path}`;
+
+// ---------------------------------------------------------------- Gelesen-Status (nur in diesem Browser)
+const SEEN_KEY = 'poker.chatLastSeen';
+export function lastSeen() {
+  try { return Number(localStorage.getItem(SEEN_KEY)) || 0; } catch { return 0; }
+}
+function markSeen(id) {
+  try { if (id > lastSeen()) localStorage.setItem(SEEN_KEY, String(id)); } catch { /* egal */ }
+}
+
+// ---------------------------------------------------------------- Erwähnungen
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Regex für "@Name" aller Spieler (längste Namen zuerst) + "@alle"
+function mentionRegex(players) {
+  const names = players.map((p) => p.name).sort((a, b) => b.length - a.length).map(escapeRe);
+  return new RegExp(`@(alle|${names.join('|')})(?![\\p{L}\\d_])`, 'giu');
+}
+
+export function mentionsMe(body, players, myName) {
+  if (!myName) return false;
+  for (const m of body.matchAll(mentionRegex(players))) {
+    const n = m[1].toLowerCase();
+    if (n === 'alle' || n === myName.toLowerCase()) return true;
+  }
+  return false;
+}
+
+// Text mit hervorgehobenen @Erwähnungen (alles als Textknoten, kein HTML)
+function renderBody(body, players, myName) {
+  const out = [];
+  let last = 0;
+  for (const m of body.matchAll(mentionRegex(players))) {
+    if (m.index > last) out.push(body.slice(last, m.index));
+    const n = m[1].toLowerCase();
+    const me = n === 'alle' || (myName && n === myName.toLowerCase());
+    const p = players.find((x) => x.name.toLowerCase() === n);
+    out.push(p
+      ? h('a', { class: `mention ${me ? 'me' : ''}`, href: `#/spieler/${p.id}` }, `@${p.name}`)
+      : h('span', { class: `mention ${me ? 'me' : ''}` }, m[0]));
+    last = m.index + m[0].length;
+  }
+  if (last < body.length) out.push(body.slice(last));
+  return out;
+}
 
 // Sieger des letzten Abends mit Ergebnis (+ Datum)
 function champion() {
@@ -16,202 +61,203 @@ function champion() {
   return w ? { pid: w.player_id, date: start.get(w.evening_id) } : null;
 }
 
-export async function boardView(tab) {
-  const tabs = h('div', { class: 'tabs board-tabs' },
-    h('a', { class: `tab ${tab === 'board' ? 'active' : ''}`, href: '#/pinnwand' }, 'Pinnwand'),
-    h('a', { class: `tab ${tab === 'chat' ? 'active' : ''}`, href: '#/pinnwand/chat' }, 'Chat'));
-  return h('div', {}, tabs, tab === 'chat' ? await chatView() : await postsView());
-}
-
-// ================================================================ Pinnwand
-async function postsView() {
-  const posts = await q(sb.from('posts').select('*').order('created_at', { ascending: false }).limit(50));
-  const ids = posts.map((p) => p.id);
-  const [comments, likes] = ids.length ? await Promise.all([
-    q(sb.from('post_comments').select('*').in('post_id', ids).order('created_at')),
-    q(sb.from('post_likes').select('*').in('post_id', ids)),
-  ]) : [[], []];
+// ================================================================ Seite
+export async function boardView() {
   const players = meta.data.players;
   const player = (pid) => players.find((p) => p.id === pid);
   const myPid = state.player?.id;
+  const myName = state.player?.name;
   const admin = state.profile.is_admin;
   const champ = champion();
-  const iAmChamp = champ && myPid && champ.pid === myPid;
-  const reload = (ok) => { if (ok) { invalidateMeta(); render(); } };
+  const iAmChamp = !!(champ && myPid && champ.pid === myPid);
 
-  // ---------- Siegerecke
-  const featured = champ && posts.find((p) => p.image_path && p.player_id === champ.pid
-    && new Date(p.created_at) >= new Date(champ.date));
-  let corner;
-  if (!champ) {
-    corner = null;
-  } else if (featured) {
-    corner = h('section', { class: 'card winner-corner' },
-      h('div', { class: 'corner-head' }, crown('lg'), h('div', {},
-        h('div', { class: 'corner-title' }, 'Siegerecke'),
-        h('div', { class: 'muted small' }, `${player(champ.pid)?.name} hat am ${fmtDate(champ.date)} gewonnen`))),
+  const [pinned, initial] = await Promise.all([
+    champ ? q(sb.from('posts').select('*').eq('player_id', champ.pid).gte('created_at', new Date(champ.date).toISOString())
+      .order('created_at', { ascending: false }).limit(5)) : [],
+    q(sb.from('chat_messages').select('*').order('id', { ascending: false }).limit(150)),
+  ]);
+  const featured = pinned.find((p) => p.image_path) ?? null;
+  let messages = initial.reverse();
+
+  return h('div', {}, winnerCorner(), chat());
+
+  // ---------------------------------------------------------- Siegerbild oben
+  function winnerCorner() {
+    if (!champ) return null;
+    const head = h('div', { class: 'corner-head' }, crown('lg'), h('div', {},
+      h('div', { class: 'corner-title' }, 'Siegerecke'),
+      h('div', { class: 'muted small' }, `${player(champ.pid)?.name ?? '?'} hat am ${fmtDate(champ.date)} gewonnen`)));
+
+    const editor = iAmChamp ? winnerEditor() : null;
+    if (!featured) {
+      return h('section', { class: 'card winner-corner empty' }, head,
+        h('p', { class: 'muted small corner-hint' }, iAmChamp
+          ? 'Du hast den letzten Abend gewonnen. Lade ein Bild hoch, es hängt hier oben für alle, bis der Nächste gewinnt.'
+          : 'Nur der Sieger darf hier ein Bild aufhängen.'),
+        editor);
+    }
+    const canDelete = iAmChamp || admin;
+    return h('section', { class: 'card winner-corner' }, head,
       h('a', { href: imageUrl(featured.image_path), target: '_blank', rel: 'noopener' },
         h('img', { class: 'corner-img', src: imageUrl(featured.image_path), alt: 'Bild des Siegers' })),
-      featured.body ? h('p', { class: 'corner-text' }, featured.body) : null);
-  } else {
-    corner = h('section', { class: 'card winner-corner empty' },
-      h('div', { class: 'corner-head' }, crown('lg'), h('div', {},
-        h('div', { class: 'corner-title' }, 'Siegerecke'),
-        h('div', { class: 'muted small' }, iAmChamp
-          ? 'Du hast den letzten Abend gewonnen. Poste unten ein Bild, es erscheint hier für alle.'
-          : `${player(champ.pid)?.name ?? 'Der Sieger'} hat am ${fmtDate(champ.date)} gewonnen. Nur er darf hier ein Bild posten.`))));
+      featured.body ? h('p', { class: 'corner-text' }, featured.body) : null,
+      h('div', { class: 'row corner-actions' },
+        editor,
+        canDelete ? h('button', { class: 'btn small', onclick: async (e) => {
+          if (!confirm('Siegerbild entfernen?')) return;
+          if (await run(() => removePost(featured), { btn: e.currentTarget })) render();
+        } }, 'Bild entfernen') : null));
   }
 
-  // ---------- Neuer Beitrag
-  let file = null;
-  const preview = h('div', { class: 'compose-preview' });
-  const text = h('textarea', { rows: 2, maxlength: 2000, placeholder: 'Was gibt’s Neues?' });
-  const showPreview = () => {
-    preview.replaceChildren();
-    if (!file) return;
-    preview.append(h('img', { src: URL.createObjectURL(file), alt: '' }),
-      h('button', { class: 'icon-btn', type: 'button', title: 'Bild entfernen', onclick: () => { file = null; showPreview(); } }, '✕'));
-  };
-  const composer = myPid ? card(
-    h('form', { class: 'compose', onsubmit: async (e) => {
-      e.preventDefault();
-      const body = text.value.trim();
-      if (!body && !file) return;
-      reload(await run(async () => {
-        let path = null;
-        if (file) {
-          const blob = await resizeImage(file, { max: 1280 });
-          path = `post-${myPid}/${Date.now()}.${blob.type === 'image/webp' ? 'webp' : 'jpg'}`;
-          const { error } = await sb.storage.from('board').upload(path, blob, { contentType: blob.type, cacheControl: '31536000' });
-          if (error) throw error;
-        }
-        try {
-          await q(sb.from('posts').insert({ player_id: myPid, body: body || null, image_path: path }));
-        } catch (err) {
-          if (path) await sb.storage.from('board').remove([path]);
-          throw err;
-        }
-      }, { btn: e.submitter, ok: 'Gepostet.' }));
-    } },
-      text,
-      preview,
-      h('div', { class: 'row compose-actions' },
-        iAmChamp ? h('button', { class: 'btn small', type: 'button', onclick: () => pickImage((f) => { file = f; showPreview(); }) }, 'Siegerbild anhängen') : null,
-        h('button', { class: 'btn primary', type: 'submit' }, 'Posten')))) : null;
+  async function removePost(p) {
+    await q(sb.from('posts').delete().eq('id', p.id));
+    if (p.image_path) await sb.storage.from('board').remove([p.image_path]);
+  }
 
-  // ---------- Beiträge
-  const postCard = (p) => {
-    const mine = p.player_id === myPid;
-    const pl = likes.filter((l) => l.post_id === p.id);
-    const liked = pl.some((l) => l.player_id === myPid);
-    const pc = comments.filter((c) => c.post_id === p.id);
-    const toggleLike = async (e) => reload(await run(() => (liked
-      ? q(sb.from('post_likes').delete().eq('post_id', p.id).eq('player_id', myPid))
-      : q(sb.from('post_likes').insert({ post_id: p.id, player_id: myPid }))), { btn: e.currentTarget }));
-    const del = async (e) => {
-      if (!confirm('Beitrag löschen?')) return;
-      reload(await run(async () => {
-        await q(sb.from('posts').delete().eq('id', p.id));
-        if (p.image_path) await sb.storage.from('board').remove([p.image_path]);
-      }, { btn: e.currentTarget }));
+  // Bild auswählen -> Vorschau + Bildunterschrift -> speichern (ersetzt das bisherige)
+  function winnerEditor() {
+    const box = h('div', { class: 'winner-editor' });
+    const start = () => pickImage((file) => {
+      const caption = h('input', { maxlength: 300, placeholder: 'Bildunterschrift (optional)' });
+      box.replaceChildren(
+        h('img', { class: 'editor-preview', src: URL.createObjectURL(file), alt: '' }),
+        caption,
+        h('div', { class: 'row' },
+          h('button', { class: 'btn primary small', onclick: async (e) => {
+            const ok = await run(async () => {
+              const blob = await resizeImage(file, { max: 1280 });
+              const path = `post-${myPid}/${Date.now()}.${blob.type === 'image/webp' ? 'webp' : 'jpg'}`;
+              const { error } = await sb.storage.from('board').upload(path, blob, { contentType: blob.type, cacheControl: '31536000' });
+              if (error) throw error;
+              try {
+                await q(sb.from('posts').insert({ player_id: myPid, body: caption.value.trim() || null, image_path: path }));
+              } catch (err) {
+                await sb.storage.from('board').remove([path]);
+                throw err;
+              }
+              // vorheriges Siegerbild aufräumen
+              for (const old of pinned.filter((p) => p.player_id === myPid)) {
+                try { await removePost(old); } catch { /* egal */ }
+              }
+            }, { btn: e.currentTarget, ok: 'Siegerbild aufgehängt.' });
+            if (ok) { invalidateMeta(); render(); }
+          } }, 'Aufhängen'),
+          h('button', { class: 'btn small', onclick: () => box.replaceChildren(button()) }, 'Abbrechen')));
+    });
+    const button = () => h('button', { class: 'btn small primary', onclick: start }, featured ? 'Bild ändern' : 'Bild hochladen');
+    box.append(button());
+    return box;
+  }
+
+  // ---------------------------------------------------------- Chat
+  function chat() {
+    const list = h('div', { class: 'chat-list' });
+
+    const msgEl = (m) => {
+      const mine = m.player_id === myPid;
+      const forMe = !mine && mentionsMe(m.body, players, myName);
+      const p = player(m.player_id);
+      return h('div', { class: `msg ${mine ? 'mine' : ''} ${forMe ? 'for-me' : ''}` },
+        !mine ? h('a', { href: `#/spieler/${m.player_id}`, class: 'plain' }, avatar(p, 'sm')) : null,
+        h('div', { class: 'bubble' },
+          !mine ? h('div', { class: 'msg-name' }, p?.name ?? '?') : null,
+          h('div', { class: 'msg-text' }, renderBody(m.body, players, myName)),
+          h('div', { class: 'msg-meta' }, fmtAgo(m.created_at),
+            mine || admin ? h('button', { class: 'icon-btn tiny', title: 'Löschen', onclick: async (e) => {
+              if (!confirm('Nachricht löschen?')) return;
+              if (await run(() => q(sb.from('chat_messages').delete().eq('id', m.id)), { btn: e.currentTarget })) {
+                messages = messages.filter((x) => x.id !== m.id);
+                draw(false);
+              }
+            } }, '✕') : null)));
     };
-    return h('article', { class: `card post ${p === featured ? 'is-featured' : ''}` },
-      h('div', { class: 'post-head' },
-        h('a', { href: `#/spieler/${p.player_id}`, class: 'plain' }, who(player(p.player_id), 'md')),
-        h('span', { class: 'muted small' }, fmtAgo(p.created_at)),
-        mine || admin ? h('button', { class: 'icon-btn', title: 'Löschen', onclick: del }, '✕') : null),
-      p.body ? h('p', { class: 'post-body' }, p.body) : null,
-      p.image_path ? h('a', { href: imageUrl(p.image_path), target: '_blank', rel: 'noopener' },
-        h('img', { class: 'post-img', src: imageUrl(p.image_path), alt: '', loading: 'lazy' })) : null,
-      h('div', { class: 'post-actions' },
-        h('button', { class: `like-btn ${liked ? 'liked' : ''}`, disabled: !myPid, onclick: toggleLike,
-          title: pl.map((l) => player(l.player_id)?.name).join(', ') || 'Gefällt mir' },
-          '♥ ', pl.length || ''),
-        h('span', { class: 'muted small' }, pc.length ? `${pc.length} Kommentar${pc.length > 1 ? 'e' : ''}` : '')),
-      pc.length ? h('div', { class: 'comments' }, pc.map((c) => h('div', { class: 'comment' },
-        avatar(player(c.player_id), 'xs'),
-        h('div', { class: 'comment-body' },
-          h('strong', {}, player(c.player_id)?.name ?? '?'), ' ', c.body,
-          h('span', { class: 'muted small' }, ' · ', fmtAgo(c.created_at))),
-        c.player_id === myPid || admin ? h('button', { class: 'icon-btn small', title: 'Löschen', onclick: async (e) =>
-          reload(await run(() => q(sb.from('post_comments').delete().eq('id', c.id)), { btn: e.currentTarget })) }, '✕') : null))) : null,
-      myPid ? h('form', { class: 'comment-form', onsubmit: async (e) => {
-        e.preventDefault();
-        const body = e.target.elements.body.value.trim();
-        if (body) reload(await run(() => q(sb.from('post_comments').insert({ post_id: p.id, player_id: myPid, body })), { btn: e.submitter }));
-      } },
-        h('input', { name: 'body', placeholder: 'Kommentieren …', maxlength: 1000, required: true }),
-        h('button', { class: 'btn small', type: 'submit' }, 'Senden')) : null);
-  };
 
-  return h('div', {},
-    corner,
-    composer,
-    posts.length ? posts.map(postCard) : card(h('p', { class: 'muted' }, 'Noch keine Beiträge. Mach den Anfang!')));
-}
+    const draw = (scroll = true) => {
+      list.replaceChildren(...(messages.length ? messages.map(msgEl)
+        : [h('p', { class: 'muted center' }, 'Noch keine Nachrichten. Schreib die erste!')]));
+      if (scroll) requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
+      if (messages.length) markSeen(messages[messages.length - 1].id);
+    };
 
-// ================================================================ Chat
-async function chatView() {
-  const myPid = state.player?.id;
-  const players = meta.data.players;
-  const player = (pid) => players.find((p) => p.id === pid);
-  const admin = state.profile.is_admin;
-  let messages = (await q(sb.from('chat_messages').select('*').order('id', { ascending: false }).limit(100))).reverse();
+    // neue Nachrichten alle 8 Sekunden nachladen
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return;
+      const lastId = messages.length ? messages[messages.length - 1].id : 0;
+      try {
+        const fresh = await q(sb.from('chat_messages').select('*').gt('id', lastId).order('id'));
+        if (fresh.length) {
+          const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
+          messages = messages.concat(fresh).slice(-300);
+          draw(atBottom);
+        }
+      } catch { /* nächster Versuch */ }
+    };
+    const timer = setInterval(poll, 8000);
+    state.cleanup = () => clearInterval(timer);
 
-  const list = h('div', { class: 'chat-list' });
-  const msgEl = (m) => {
-    const mine = m.player_id === myPid;
-    return h('div', { class: `msg ${mine ? 'mine' : ''}`, 'data-id': m.id },
-      !mine ? avatar(player(m.player_id), 'sm') : null,
-      h('div', { class: 'bubble' },
-        !mine ? h('div', { class: 'msg-name' }, player(m.player_id)?.name ?? '?') : null,
-        h('div', { class: 'msg-text' }, m.body),
-        h('div', { class: 'msg-meta' }, fmtAgo(m.created_at),
-          mine || admin ? h('button', { class: 'icon-btn tiny', title: 'Löschen', onclick: async (e) => {
-            if (!confirm('Nachricht löschen?')) return;
-            if (await run(() => q(sb.from('chat_messages').delete().eq('id', m.id)), { btn: e.currentTarget })) {
-              messages = messages.filter((x) => x.id !== m.id);
-              draw(false);
-            }
-          } }, '✕') : null)));
-  };
-  const draw = (scroll = true) => {
-    list.replaceChildren(...(messages.length ? messages.map(msgEl) : [h('p', { class: 'muted center' }, 'Noch keine Nachrichten.')]));
-    if (scroll) requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
-  };
+    // ---------- Eingabe mit @-Vorschlägen
+    const input = h('textarea', { rows: 1, maxlength: 1000, placeholder: 'Nachricht … (@ für Namen)', autocomplete: 'off' });
+    const suggest = h('div', { class: 'mention-suggest', hidden: true });
 
-  // Neue Nachrichten regelmäßig nachladen
-  const poll = async () => {
-    if (document.visibilityState !== 'visible') return;
-    const lastId = messages.length ? messages[messages.length - 1].id : 0;
-    try {
-      const fresh = await q(sb.from('chat_messages').select('*').gt('id', lastId).order('id'));
-      if (fresh.length) {
-        const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 80;
-        messages = messages.concat(fresh).slice(-200);
-        draw(atBottom);
-      }
-    } catch { /* nächster Versuch */ }
-  };
-  const timer = setInterval(poll, 8000);
-  state.cleanup = () => clearInterval(timer);
-
-  const input = h('input', { name: 'body', placeholder: 'Nachricht …', maxlength: 1000, autocomplete: 'off', required: true });
-  const form = myPid ? h('form', { class: 'chat-form', onsubmit: async (e) => {
-    e.preventDefault();
-    const body = input.value.trim();
-    if (!body) return;
-    const btn = e.submitter;
-    if (await run(() => q(sb.from('chat_messages').insert({ player_id: myPid, body })), { btn })) {
-      input.value = '';
-      await poll();
-      list.scrollTop = list.scrollHeight;
+    const currentToken = () => {
+      const before = input.value.slice(0, input.selectionStart);
+      const m = before.match(/(^|\s)@([\p{L}\d_-]*)$/u);
+      return m ? { query: m[2], start: before.length - m[2].length - 1 } : null;
+    };
+    const insert = (name) => {
+      const t = currentToken();
+      if (!t) return;
+      const after = input.value.slice(input.selectionStart);
+      input.value = `${input.value.slice(0, t.start)}@${name} ${after.replace(/^\s+/, '')}`;
+      const pos = t.start + name.length + 2;
+      input.setSelectionRange(pos, pos);
+      suggest.hidden = true;
       input.focus();
-    }
-  } }, input, h('button', { class: 'btn primary', type: 'submit' }, 'Senden'))
-    : h('p', { class: 'hint' }, 'Dein Account ist noch keinem Spieler zugeordnet.');
+      autosize();
+    };
+    const updateSuggest = () => {
+      const t = currentToken();
+      if (!t) { suggest.hidden = true; return; }
+      const qy = t.query.toLowerCase();
+      const options = [{ id: 0, name: 'alle' }, ...players.filter((p) => p.id !== myPid)]
+        .filter((p) => p.name.toLowerCase().startsWith(qy)).slice(0, 6);
+      if (!options.length) { suggest.hidden = true; return; }
+      suggest.replaceChildren(...options.map((p) => h('button', {
+        type: 'button', class: 'suggest-item',
+        onmousedown: (e) => e.preventDefault(), // Fokus im Eingabefeld behalten
+        onclick: () => insert(p.name),
+      }, p.id ? avatar(p, 'xs') : h('span', { class: 'avatar xs initial' }, '@'), p.id ? p.name : 'alle')));
+      suggest.hidden = false;
+    };
+    const autosize = () => { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 140)}px`; };
+    input.addEventListener('input', () => { updateSuggest(); autosize(); });
+    input.addEventListener('click', updateSuggest);
+    input.addEventListener('blur', () => setTimeout(() => { suggest.hidden = true; }, 150));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        if (!suggest.hidden) { suggest.querySelector('button')?.click(); return; }
+        form.requestSubmit();
+      }
+      if (e.key === 'Escape') suggest.hidden = true;
+    });
 
-  draw();
-  return card(list, form);
+    const form = myPid ? h('form', { class: 'chat-form', onsubmit: async (e) => {
+      e.preventDefault();
+      const body = input.value.trim();
+      if (!body) return;
+      const btn = form.querySelector('button[type=submit]');
+      if (await run(() => q(sb.from('chat_messages').insert({ player_id: myPid, body })), { btn })) {
+        input.value = '';
+        autosize();
+        await poll();
+        list.scrollTop = list.scrollHeight;
+        input.focus();
+      }
+    } }, h('div', { class: 'chat-input' }, suggest, input), h('button', { class: 'btn primary', type: 'submit' }, 'Senden'))
+      : h('p', { class: 'hint' }, 'Dein Account ist noch keinem Spieler zugeordnet.');
+
+    draw();
+    return h('section', { class: 'card chat-card' }, h('h2', {}, 'Chat'), list, form);
+  }
 }
-

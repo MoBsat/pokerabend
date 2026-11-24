@@ -20,10 +20,23 @@ Webanwendung für unseren Pokerabend: Zusagen, Essensabstimmung, Mitbringliste, 
 | Spieler | Admin | Spieler gibt es auch ohne Account; beim Freischalten wird ein Account einem Spieler zugeordnet |
 | Korrekturen | Admin | Zusagen und Essen kann der Admin auch nach der Frist ändern |
 | Profilbilder | alle (eigenes), Admin (alle) | Upload im Profil, Anzeige in Listen, Platzierung und Statistik |
-| Pinnwand und Chat | alle | Beiträge, Kommentare, Likes, Chat; der Admin kann alles löschen |
-| Siegerecke | Sieger des letzten Abends | darf als Einziger ein Bild posten, das oben angezeigt wird |
+| Chat | alle | Gruppenchat mit @-Erwähnungen und Ungelesen-Anzeige; der Admin kann alles löschen |
+| Siegerecke | Sieger des letzten Abends | darf als Einziger ein Bild oben im Chat aufhängen und ändern |
 | Titel und Krone | automatisch | Abzeichen auf den Spielerseiten, Krone für den Tabellenführer |
 | Regeln | alle lesen, Admin bearbeitet | eigene Seite im Menü |
+
+## Update auf Version 5 (Chat mit Siegerecke und @-Erwähnungen)
+
+Kein SQL nötig, nur die Dateien. Voraussetzung: Version 4 ist eingespielt.
+
+1. Alle Dateien ins GitHub-Repo hochladen und vorhandene überschreiben. Geändert sind `js/app.js`, `js/badges.js`, `js/views/board.js` und `css/style.css`.
+2. Die Seite in einem privaten Fenster öffnen oder mit Strg+F5 neu laden.
+
+Neu in Version 5:
+- Pinnwand und Chat sind eine Seite (**Chat** im Menü). Oben hängt das Siegerbild, darunter der Chat.
+- Der Sieger des letzten Abends kann sein Bild mit Bildunterschrift hochladen und jederzeit ändern. Das alte Bild wird dabei gelöscht.
+- **@-Erwähnungen:** Wer im Chat `@` tippt, bekommt Namen vorgeschlagen. `@alle` erwähnt alle. Nachrichten, in denen man erwähnt wird, sind golden umrandet.
+- Im Menü zeigt „Chat“ die Zahl der ungelesenen Nachrichten, bei einer Erwähnung ein rotes **@**. Der Gelesen-Status wird pro Gerät im Browser gespeichert.
 
 ## Update auf Version 4 (Pinnwand, Chat, Titel, Regeln)
 

@@ -7,11 +7,11 @@ import { eveningView } from './views/evening.js';
 import { statsView } from './views/stats.js';
 import { adminView } from './views/admin.js';
 import { profileView } from './views/profile.js';
-import { boardView } from './views/board.js';
+import { boardView, lastSeen, mentionsMe } from './views/board.js';
 import { rulesView } from './views/rules.js';
 import { playerView } from './views/player.js';
 import { avatar } from './avatar.js';
-import { loadMeta } from './badges.js';
+import { loadMeta, meta } from './badges.js';
 
 export const state = { session: null, profile: null, player: null, recovery: false, cleanup: null };
 
@@ -43,11 +43,24 @@ export function navigate(hash) {
   else location.hash = hash;
 }
 
+// Zähler für ungelesene Chatnachrichten (rot mit @, wenn man erwähnt wurde)
+function chatBadge() {
+  const chats = meta.data?.chats;
+  if (!chats || location.hash.startsWith('#/chat') || location.hash.startsWith('#/pinnwand')) return null;
+  const seen = lastSeen();
+  const myPid = state.player?.id;
+  const unread = chats.filter((c) => c.id > seen && c.player_id !== myPid);
+  if (!unread.length) return null;
+  const forMe = unread.some((c) => mentionsMe(c.body, meta.data.players, state.player?.name));
+  return h('span', { class: `nav-badge ${forMe ? 'mention' : ''}` }, forMe ? '@' : String(Math.min(unread.length, 99)));
+}
+
 function header() {
   if (!state.session || !state.profile?.approved || state.recovery) {
     return h('header', { class: 'topbar' }, h('div', { class: 'brand' }, suit('s'), ' ', APP_NAME));
   }
-  const route = location.hash.replace(/^#\/?/, '').split('/')[0];
+  let route = location.hash.replace(/^#\/?/, '').split('/')[0];
+  if (route === 'pinnwand') route = 'chat';
   const link = (r, ...label) => h('a', { href: `#/${r}`, class: route === r ? 'active' : null }, ...label);
   const me = h('a', { href: '#/profil', class: `nav-me ${route === 'profil' ? 'active' : ''}`, title: 'Profil', 'aria-label': 'Profil' },
     state.player ? avatar(state.player, 'sm') : h('span', { class: 'avatar sm initial' }, '?'));
@@ -55,7 +68,7 @@ function header() {
     h('div', { class: 'topbar-row' }, h('a', { class: 'brand', href: '#/' }, suit('s'), ' ', APP_NAME), me),
     h('nav', {},
       link('', 'Abende'),
-      link('pinnwand', 'Pinnwand'),
+      link('chat', 'Chat', chatBadge()),
       link('statistik', 'Statistik'),
       link('regeln', 'Regeln'),
       state.profile.is_admin ? link('admin', 'Admin') : null,
@@ -78,7 +91,8 @@ export async function render() {
       case 'statistik': view = statsView; break;
       case 'admin': view = state.profile.is_admin ? adminView : eveningsView; break;
       case 'profil': view = profileView; break;
-      case 'pinnwand': view = () => boardView(parts[1] === 'chat' ? 'chat' : 'board'); break;
+      case 'chat':
+      case 'pinnwand': view = boardView; break;
       case 'regeln': view = rulesView; break;
       case 'spieler': view = () => playerView(Number(parts[1])); break;
       default: view = eveningsView;
@@ -100,6 +114,7 @@ export async function render() {
     const content = await view(parts);
     if (token !== renderToken) return;
     main.replaceChildren(content);
+    headerSlot.replaceChildren(header()); // Ungelesen-Zähler aktualisieren
   } catch (e) {
     console.error(e);
     if (token !== renderToken) return;

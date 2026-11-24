@@ -597,6 +597,7 @@ insert into public.app_texts (key, body) values ('rules',
 # Spielregeln
 - Hier eure Pokerregeln eintragen (Buy-in, Blinds, Rebuys …).
 
-# Pinnwand
-- Der Sieger des letzten Abends darf ein Bild posten, das oben für alle angezeigt wird.')
+# Chat
+- Der Sieger des letzten Abends darf ein Bild oben im Chat aufhängen.
+- Mit @Name erwähnst du jemanden, mit @alle die ganze Runde.')
 on conflict (key) do nothing;

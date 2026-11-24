@@ -429,3 +429,26 @@ a.btn:hover { text-decoration: none; }
 .nav-me .avatar { width: 2rem; height: 2rem; }
 .nav-me.active { background: var(--gold); }
 .topbar nav { justify-content: flex-start; }
+
+/* ---- Version 5: Chat mit Siegerecke und Erwähnungen ---- */
+.nav-badge { display: inline-block; min-width: 1.15rem; height: 1.15rem; line-height: 1.15rem; margin-left: .3rem; padding: 0 .3rem; border-radius: 999px; background: var(--gold); color: #1b1406; font-size: .72rem; font-weight: 700; text-align: center; vertical-align: 1px; }
+.nav-badge.mention { background: var(--red-2); color: #fff; }
+.topbar nav a.active .nav-badge { background: #1b1406; color: var(--gold-2); }
+.corner-hint { margin: .7rem 0 .2rem; }
+.corner-actions { margin-top: .7rem; }
+.winner-editor { display: flex; flex-direction: column; gap: .5rem; width: 100%; margin-top: .4rem; }
+.corner-actions .winner-editor { width: auto; margin: 0; }
+.editor-preview { max-height: 220px; max-width: 100%; object-fit: contain; border-radius: 8px; align-self: flex-start; }
+.corner-img { max-height: 45vh; }
+.chat-card h2 { margin-bottom: .4rem; }
+.chat-list { height: min(55vh, 560px); }
+.chat-form { align-items: flex-end; }
+.chat-input { position: relative; flex: 1; }
+.chat-input textarea { resize: none; overflow-y: auto; min-height: 2.6rem; line-height: 1.35; display: block; }
+.mention-suggest { position: absolute; left: 0; right: 0; bottom: calc(100% + .35rem); z-index: 5; background: #0d211a; border: 1px solid var(--gold); border-radius: 10px; padding: .25rem; box-shadow: 0 -6px 20px rgba(0,0,0,.5); display: flex; flex-direction: column; }
+.mention-suggest[hidden] { display: none; }
+.suggest-item { display: flex; align-items: center; gap: .5rem; font: inherit; color: var(--text); background: none; border: none; text-align: left; padding: .45rem .55rem; border-radius: 8px; cursor: pointer; }
+.suggest-item:hover, .suggest-item:focus { background: rgba(201,162,74,.15); }
+.mention { color: var(--gold-2); font-weight: 600; text-decoration: none; }
+.mention.me { background: rgba(201,162,74,.25); border-radius: 4px; padding: 0 .2rem; }
+.msg.for-me .bubble { border-color: var(--gold); box-shadow: 0 0 0 1px var(--gold) inset; }
