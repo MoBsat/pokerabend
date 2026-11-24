@@ -32,6 +32,22 @@ export async function adminView() {
         } }, 'Freischalten')));
   };
 
+  // Bereits freigeschalteten Account ohne Spieler nachträglich zuordnen
+  const assignRow = (p) => {
+    const sel = assignSelect(p);
+    return h('div', { class: 'row assign-row' }, sel,
+      h('button', { class: 'btn small primary', onclick: async (e) => {
+        const isNew = sel.value === 'new';
+        const ok = await run(async () => {
+          await q(sb.rpc('approve_user', {
+            p_user: p.id, p_player: isNew ? null : Number(sel.value), p_new_name: isNew ? p.display_name : null,
+          }));
+          if (p.id === state.session.user.id) await loadProfile();
+        }, { btn: e.currentTarget, ok: `${p.display_name} zugeordnet.` });
+        reload(ok);
+      } }, 'Zuordnen'));
+  };
+
   const updateProfile = (p, patch, ok) => async (e) =>
     reload(await run(() => q(sb.from('profiles').update(patch).eq('id', p.id)), { btn: e.currentTarget, ok }));
 
@@ -92,6 +108,7 @@ export async function adminView() {
           h('div', {},
             h('strong', {}, p.display_name), p.is_admin ? h('span', { class: 'badge gold' }, 'Admin') : null,
             h('div', { class: 'muted small' }, pl ? `Spieler: ${pl.name}` : 'keinem Spieler zugeordnet')),
+          !pl ? assignRow(p) : null,
           self ? h('span', { class: 'muted small' }, 'Du') : h('span', { class: 'row' },
             h('button', { class: 'btn small', onclick: async (e) => {
               const msg = p.is_admin ? `${p.display_name} die Admin-Rechte entziehen?` : `${p.display_name} zum Admin machen?`;

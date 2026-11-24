@@ -26,7 +26,8 @@ export function profileView() {
       h('h1', {}, 'Profil'),
       h('p', {}, h('span', { class: 'muted' }, 'Spieler: '), h('strong', {}, state.player?.name ?? 'noch nicht zugeordnet')),
       h('p', {}, h('span', { class: 'muted' }, 'E-Mail: '), state.session.user.email),
-      h('p', { class: 'hint' }, 'Den Spielernamen ändert der Admin.')),
+      h('p', { class: 'hint' }, 'Den Spielernamen ändert der Admin.'),
+      state.player ? h('a', { class: 'btn', href: `#/spieler/${state.player.id}` }, 'Meine Spielerseite') : null),
     card(
       h('h2', {}, 'Passwort ändern'),
       h('form', { onsubmit: async (e) => {

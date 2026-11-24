@@ -20,6 +20,25 @@ Webanwendung für unseren Pokerabend: Zusagen, Essensabstimmung, Mitbringliste, 
 | Spieler | Admin | Spieler gibt es auch ohne Account; beim Freischalten wird ein Account einem Spieler zugeordnet |
 | Korrekturen | Admin | Zusagen und Essen kann der Admin auch nach der Frist ändern |
 | Profilbilder | alle (eigenes), Admin (alle) | Upload im Profil, Anzeige in Listen, Platzierung und Statistik |
+| Pinnwand und Chat | alle | Beiträge, Kommentare, Likes, Chat; der Admin kann alles löschen |
+| Siegerecke | Sieger des letzten Abends | darf als Einziger ein Bild posten, das oben angezeigt wird |
+| Titel und Krone | automatisch | Abzeichen auf den Spielerseiten, Krone für den Tabellenführer |
+| Regeln | alle lesen, Admin bearbeitet | eigene Seite im Menü |
+
+## Update auf Version 4 (Pinnwand, Chat, Titel, Regeln)
+
+Voraussetzung: Version 3 ist eingespielt.
+
+1. Den Inhalt von `supabase/update_v4.sql` im Supabase **SQL Editor** ausführen. Alle Daten bleiben erhalten, mehrfaches Ausführen schadet nicht.
+2. Alle Dateien ins GitHub-Repo hochladen und vorhandene überschreiben. Neu sind `js/badges.js`, `js/views/board.js`, `js/views/player.js` und `js/views/rules.js`.
+3. Die Seite in einem privaten Fenster öffnen oder mit Strg+F5 neu laden.
+
+Neu in Version 4:
+- **Pinnwand** mit Beiträgen, Kommentaren und Likes sowie einem **Chat**, der sich alle 8 Sekunden aktualisiert.
+- **Siegerecke:** Nur der Sieger des letzten Abends darf ein Bild posten. Es erscheint oben für alle, bis es einen neuen Sieger gibt. Das prüft die Datenbank, nicht nur die App.
+- **Titel** wie Seriensieger, Comeback, Rote Laterne oder Adana-König werden automatisch vergeben und stehen auf den Spielerseiten (in der Statistik auf einen Namen tippen).
+- **Krone** für den Tabellenführer des laufenden Jahres, überall am Namen.
+- **Regeln:** Alle sehen sie, nur der Admin kann sie bearbeiten.
 
 ## Update auf Version 3 (Profilbilder)
 
@@ -114,7 +133,8 @@ index.html            Einstieg, CSP
 css/style.css         Design
 js/config.js          Supabase-URL und Key
 js/app.js             Routing, Login-Status
-js/avatar.js          Profilbilder (Zuschnitt, Upload)
+js/avatar.js          Profilbilder (Zuschnitt, Upload), Krone
+js/badges.js          Titel und Tabellenführer
 js/views/*.js         Ansichten (Login, Abende, Abend, Statistik, Admin, Profil)
 supabase/schema.sql   Datenbank, Rechte, Funktionen
 vendor/supabase.js    Supabase-Client

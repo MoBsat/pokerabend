@@ -71,6 +71,21 @@ export const fmtDate = (iso) => df.format(new Date(iso));
 const tf = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
 export const fmtTime = (iso) => tf.format(new Date(iso)) + ' Uhr';
 
+// "gerade eben", "vor 5 Min.", "vor 3 Std.", "gestern 18:30", sonst Datum
+export function fmtAgo(iso) {
+  const d = new Date(iso);
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return 'gerade eben';
+  if (diff < 3600) return `vor ${Math.floor(diff / 60)} Min.`;
+  if (diff < 6 * 3600) return `vor ${Math.floor(diff / 3600)} Std.`;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = new Date(d); day.setHours(0, 0, 0, 0);
+  const days = Math.round((today - day) / 864e5);
+  if (days === 0) return `heute ${tf.format(d)}`;
+  if (days === 1) return `gestern ${tf.format(d)}`;
+  return `${df.format(d)} ${tf.format(d)}`;
+}
+
 // ISO -> Wert für <input type="datetime-local"> in lokaler Zeit
 export function toLocalInput(iso) {
   const d = new Date(iso);

@@ -3,6 +3,7 @@ import { h, run, fmtDateTime, toLocalInput, card, formData, suit } from '../ui.j
 import { state, render, navigate } from '../app.js';
 import { STATUS, BRING_ITEMS, isOpen, hasStarted, isFullResult, foodText } from '../data.js';
 import { who } from '../avatar.js';
+import { invalidateMeta } from '../badges.js';
 
 export async function eveningView(id) {
   if (!Number.isInteger(id)) return notFound();
@@ -39,7 +40,7 @@ export async function eveningView(id) {
 }
 
 const notFound = () => card(h('h2', {}, 'Abend nicht gefunden'), h('a', { href: '#/' }, 'Zur Übersicht'));
-const reload = (ok) => { if (ok) render(); };
+const reload = (ok) => { if (ok) { invalidateMeta(); render(); } };
 let fixOpen = false; // Admin-Korrektur bleibt nach Änderungen aufgeklappt
 
 // ---------------------------------------------------------------- Kopf

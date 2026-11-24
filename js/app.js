@@ -7,9 +7,13 @@ import { eveningView } from './views/evening.js';
 import { statsView } from './views/stats.js';
 import { adminView } from './views/admin.js';
 import { profileView } from './views/profile.js';
+import { boardView } from './views/board.js';
+import { rulesView } from './views/rules.js';
+import { playerView } from './views/player.js';
 import { avatar } from './avatar.js';
+import { loadMeta } from './badges.js';
 
-export const state = { session: null, profile: null, player: null, recovery: false };
+export const state = { session: null, profile: null, player: null, recovery: false, cleanup: null };
 
 const app = document.getElementById('app');
 const headerSlot = h('div');
@@ -45,13 +49,16 @@ function header() {
   }
   const route = location.hash.replace(/^#\/?/, '').split('/')[0];
   const link = (r, ...label) => h('a', { href: `#/${r}`, class: route === r ? 'active' : null }, ...label);
+  const me = h('a', { href: '#/profil', class: `nav-me ${route === 'profil' ? 'active' : ''}`, title: 'Profil', 'aria-label': 'Profil' },
+    state.player ? avatar(state.player, 'sm') : h('span', { class: 'avatar sm initial' }, '?'));
   return h('header', { class: 'topbar' },
-    h('a', { class: 'brand', href: '#/' }, suit('s'), ' ', APP_NAME),
+    h('div', { class: 'topbar-row' }, h('a', { class: 'brand', href: '#/' }, suit('s'), ' ', APP_NAME), me),
     h('nav', {},
       link('', 'Abende'),
+      link('pinnwand', 'Pinnwand'),
       link('statistik', 'Statistik'),
+      link('regeln', 'Regeln'),
       state.profile.is_admin ? link('admin', 'Admin') : null,
-      link('profil', state.player ? avatar(state.player, 'xs') : null, state.player?.name ?? state.profile.display_name),
     ));
 }
 
@@ -71,14 +78,25 @@ export async function render() {
       case 'statistik': view = statsView; break;
       case 'admin': view = state.profile.is_admin ? adminView : eveningsView; break;
       case 'profil': view = profileView; break;
+      case 'pinnwand': view = () => boardView(parts[1] === 'chat' ? 'chat' : 'board'); break;
+      case 'regeln': view = rulesView; break;
+      case 'spieler': view = () => playerView(Number(parts[1])); break;
       default: view = eveningsView;
     }
   }
+
+  // Aufräumen der vorherigen Ansicht (z. B. Chat-Aktualisierung)
+  if (state.cleanup) { try { state.cleanup(); } catch { /* egal */ } state.cleanup = null; }
 
   headerSlot.replaceChildren(header());
   if (!main.firstChild) main.append(h('div', { class: 'loading' }, 'Lade …'));
   main.setAttribute('aria-busy', 'true');
   try {
+    if (state.profile?.approved && !state.recovery) {
+      try { await loadMeta(); } catch (e) { console.error(e); }
+      if (token !== renderToken) return;
+      headerSlot.replaceChildren(header());
+    }
     const content = await view(parts);
     if (token !== renderToken) return;
     main.replaceChildren(content);

@@ -79,7 +79,7 @@ export async function statsView() {
         h('th', {}, 'Abende*'), h('th', {}, 'Ø Platz*'), h('th', { class: 'opt' }, 'Top 3*'))),
       h('tbody', {}, rows.map((r, i) => h('tr', { class: r.pid === myPid ? 'me' : null },
         h('td', {}, i + 1),
-        h('td', { class: 'l' }, who(players.find((p) => p.id === r.pid), 'xs')),
+        h('td', { class: 'l' }, h('a', { class: 'plain', href: `#/spieler/${r.pid}` }, who(players.find((p) => p.id === r.pid), 'xs'))),
         h('td', { class: 'strong' }, r.wins),
         h('td', {}, r.buyer),
         h('td', {}, r.games || '–'),
@@ -101,7 +101,7 @@ export async function statsView() {
           record('Bester Kunde beim Lieferdienst', top((r) => r.buyer), (v) => `${v}×`),
           record('Bester Ø-Platz (ab 3 Abenden)', top(negAvg, rows.filter((r) => r.games >= 3)), (v) => fmt(-v)),
           record('Meiste Teilnahmen*', top((r) => r.games), (v) => v))),
-      card(h('h2', {}, 'Rangliste'), table,
+      card(h('h2', {}, 'Rangliste'), h('p', { class: 'hint' }, 'Auf einen Namen tippen für Titel und Bilanz.'), table,
         h('p', { class: 'hint' }, `* nur Abende mit vollständiger Platzierung (${fullCount}). Bei älteren Abenden sind nur Sieger und Verlierer erfasst.`)),
       card(h('h2', {}, 'Verlauf'), h('div', { class: 'list' }, history)),
     ];
